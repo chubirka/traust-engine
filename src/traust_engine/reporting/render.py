@@ -638,7 +638,7 @@ def render_threat_model(document: dict) -> str:
         lines += ["## 11. Risk ratings", ""]
         lines += [
             "Rated with the [OWASP Risk Rating Methodology]"
-            f"({threat_rating.rr.SOURCE}) (OWASP Foundation, CC BY-SA 4.0). "
+            f"({threat_rating.rr.SOURCE}) (OWASP Foundation). "
             "Each factor is scored 0-9; likelihood and impact are the means "
             "of their factors.",
             "",
