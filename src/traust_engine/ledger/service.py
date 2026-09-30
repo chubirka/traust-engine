@@ -207,24 +207,73 @@ class LedgerService:
         and countersign (finding_aliases). Atomic: mutate + stamp + sign in one
         Backend.mutate call.
 
+        First writes and new keys only for signature-bound fields
+        (``claim_hashes``, ``audit_report_sha256``, ``artifact_digests``): the
+        ledger refuses to overwrite a value it already signed. Use
+        :meth:`restate` for that.
+
         *sign* parameter is accepted for backward compat but ignored — writes
         are always atomic (stamped + signed) through the SDK.
         """
         self._client.patch_metadata(layer_path.stem, updates)
 
-    def stamp_report_file(self, layer_path: Path, report_path: Path, *, sign: bool = True) -> bool:
-        """Record audit_report_sha256 in layer metadata atomically via SDK.
+    def restate(
+        self,
+        layer_path: Path,
+        *,
+        target: str,
+        before: Any,
+        after: Any,
+        rationale: str,
+        ticket: str,
+        reason: str = "baseline_rewrite",
+        approved_by: str | None = None,
+        finding_ref: str | None = None,
+    ) -> dict[str, Any]:
+        """Overwrite a signature-bound metadata value through a recorded restatement.
 
-        Returns True (always stamps — idempotency is handled by the SDK).
+        The one sanctioned way to change ``claim_hashes``, ``audit_report_sha256``
+        or ``artifact_digests`` once signed: the prior value, the verified actor,
+        the ticket and the rationale are appended inside the Merkle tree, the
+        value is applied, and the layer re-signs — atomically. For map targets
+        ``before``/``after`` carry only the changed keys.
+        """
+        authority: dict[str, Any] = {"ticket": ticket}
+        if approved_by:
+            authority["approved_by"] = approved_by
+        block = {
+            "target": target,
+            "reason": reason,
+            "before": before,
+            "after": after,
+            "authority": authority,
+        }
+        return self._client.restate(
+            layer_path.stem, block, rationale=rationale, finding_ref=finding_ref
+        )
+
+    def stamp_report_file(self, layer_path: Path, report_path: Path, *, sign: bool = True) -> bool:
+        """Pin audit_report_sha256 for *report_path* in the layer.
+
+        Returns True when a digest was written, False when the layer already
+        holds this report's digest. A layer pinned to *different* report bytes
+        is refused: replacing a signed digest needs :meth:`restate`
+        (``target="audit_report_sha256"``) so the change is explained.
         *sign* accepted for backward compat but ignored — writes are atomic.
         """
         digest = reports.report_sha256(str(report_path))
-        self._client.patch_metadata(
-            layer_path.stem,
-            {
-                "audit_report_sha256": digest,
-            },
+        current = (self.read_layer_file(layer_path).get("metadata") or {}).get(
+            "audit_report_sha256"
         )
+        if current == digest:
+            return False
+        if current:
+            raise LedgerError(
+                f"{layer_path.name} pins a different audit report "
+                f"({current[:12]}…, now {digest[:12]}…) — restate "
+                "audit_report_sha256 with a ticket and rationale instead of re-stamping"
+            )
+        self._client.patch_metadata(layer_path.stem, {"audit_report_sha256": digest})
         return True
 
     def stamp_event_identities(self, layer_path: Path, fingerprints: dict[str, str]) -> int:

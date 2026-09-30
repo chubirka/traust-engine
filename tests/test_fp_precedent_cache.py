@@ -702,5 +702,24 @@ class TestVendorNormalization(unittest.TestCase):
         )
 
 
+class TestSoundnessResolverLocation(unittest.TestCase):
+    """load_resolution is local-only: a remote location must be refused, not
+    mangled by Path() into a relative local folder named 's3:'."""
+
+    def test_refuses_a_remote_uri(self):
+        from traust_engine.corpus.precedent import SoundnessResolver
+        from traust_engine.storage import StorageError
+
+        for location in ("s3://bucket/results", Path("s3://bucket/results")):
+            with self.assertRaises(StorageError, msg=str(location)):
+                SoundnessResolver(location)
+
+    def test_accepts_a_local_path(self):
+        from traust_engine.corpus.precedent import SoundnessResolver
+
+        with tempfile.TemporaryDirectory() as td:
+            self.assertEqual(SoundnessResolver(Path(td)).root, Path(td))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -35,6 +35,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import posixpath
 import sqlite3
 from collections.abc import Iterable
 from pathlib import Path
@@ -42,6 +43,7 @@ from typing import Protocol
 
 from traust_contracts.config import CorpusConfig
 
+from traust_engine import storage
 from traust_engine.corpus.resolver import (
     ReportRecord,
     Resolution,
@@ -52,10 +54,12 @@ from traust_engine.corpus.resolver import (
 
 __all__ = [
     "DigestMismatch",
+    "FsspecBackend",
     "LocalBackend",
     "MemoryBackend",
     "ReportStore",
     "load_resolution",
+    "open_backend",
     "to_ref",
 ]
 
@@ -131,6 +135,115 @@ class MemoryBackend:
 
     def list(self, prefix: str = "") -> Iterable[str]:
         return sorted(r for r in self._data if r.startswith(prefix))
+
+
+#: Schemes a report store can write to. ``http(s)://`` is readable through
+#: `storage` but not writable, so it is refused as a report location up front
+#: rather than failing on the first write.
+WRITABLE_SCHEMES = ("s3://", "gs://", "gcs://", "az://", "abfs://")
+
+#: fsspec protocols whose first path segment is a bucket/container that can be
+#: checked once at construction.
+_BUCKET_PROTOCOLS = frozenset({"s3", "s3a", "gs", "gcs", "az", "abfs", "abfss"})
+
+
+class FsspecBackend:
+    """Refs are keys under a remote root (``s3://bucket/prefix``), same shape as
+    `LocalBackend`'s relative paths. Object stores have no symlinks, so containment
+    is lexical: absolute refs and ``..`` segments are rejected.
+
+    Failures surface as `storage.StorageError`, never as "no such report": fsspec
+    reports bad credentials, an unreachable endpoint and a missing bucket the same
+    way it reports a missing object, and a caller would act on that as absence.
+    """
+
+    def __init__(self, root: str) -> None:
+        self.root = root.rstrip("/")
+        self._fs, base = storage.filesystem(self.root)
+        self._base = base.rstrip("/")
+        self._check_bucket()
+
+    def _check_bucket(self) -> None:
+        """Fail loud on a bucket typo, which s3fs otherwise reports per object as
+        `FileNotFoundError` — indistinguishable from a missing report."""
+        protocols = self._fs.protocol
+        protocols = {protocols} if isinstance(protocols, str) else set(protocols)
+        if not protocols & _BUCKET_PROTOCOLS:
+            return
+        bucket = self._base.split("/", 1)[0]
+        try:
+            self._fs.info(bucket)
+        except FileNotFoundError as e:
+            raise storage.StorageError(f"bucket {bucket!r} not found for {self.root}") from e
+        except Exception as e:
+            raise storage.StorageError(f"cannot reach {self.root}: {e}") from e
+
+    def _path(self, ref: str) -> str:
+        norm = posixpath.normpath(ref)
+        if ref.startswith("/") or norm in (".", "..") or norm.startswith("../"):
+            raise ValueError(f"ref {ref!r} resolves outside {self.root}")
+        return f"{self._base}/{norm}"
+
+    def read(self, ref: str) -> bytes:
+        path = self._path(ref)
+        try:
+            return self._fs.cat_file(path)
+        except FileNotFoundError:
+            raise
+        except Exception as e:
+            raise storage.StorageError(f"read failed for {self.root}/{ref}: {e}") from e
+
+    def write(self, ref: str, data: bytes) -> None:
+        path = self._path(ref)
+        try:
+            self._fs.pipe_file(path, data)
+        except Exception as e:
+            raise storage.StorageError(f"write failed for {self.root}/{ref}: {e}") from e
+
+    def exists(self, ref: str) -> bool:
+        # Not fsspec's isfile(): it swallows every exception and returns False,
+        # so wrong credentials or a dead endpoint read as "no such report".
+        try:
+            path = self._path(ref)
+        except ValueError:
+            return False
+        try:
+            return self._fs.info(path).get("type") == "file"
+        except FileNotFoundError:
+            return False
+        except Exception as e:
+            raise storage.StorageError(f"exists failed for {self.root}/{ref}: {e}") from e
+
+    def list(self, prefix: str = "") -> Iterable[str]:
+        head = f"{self._base}/"
+        try:
+            found = self._fs.find(self._base)
+        except Exception as e:
+            raise storage.StorageError(f"list failed for {self.root}: {e}") from e
+        refs = (p[len(head) :] for p in found if p.startswith(head))
+        return sorted(r for r in refs if r.startswith(prefix))
+
+
+def open_backend(location: str | os.PathLike) -> Backend:
+    """The `Backend` for a location value (``locations.analysis_results``).
+
+    A bare path or ``file://`` is a `LocalBackend` and imports nothing; a writable
+    remote URI (``s3://``, ``gs://``, ``az://``, ...) is an `FsspecBackend`. Other
+    remote schemes (``http(s)://``) are readable elsewhere but cannot hold a report
+    store, so they are refused here. Consumers take the store from
+    ``engine.corpus.report_store()`` rather than choosing a backend themselves.
+    """
+    s = str(location)
+    if s.startswith(WRITABLE_SCHEMES):
+        return FsspecBackend(s)
+    if storage.is_remote(s):
+        raise storage.StorageError(
+            f"{s!r} is not a writable report location; use one of "
+            f"{', '.join(WRITABLE_SCHEMES)}, a path, or file://"
+        )
+    if "://" in s and not s.startswith("file://"):
+        raise storage.StorageError(f"unsupported storage location scheme: {s!r}")
+    return LocalBackend(Path(s.removeprefix("file://")))
 
 
 class ReportStore:

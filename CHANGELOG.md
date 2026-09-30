@@ -2,6 +2,50 @@
 
 All notable changes to traust-engine are documented here.
 
+## [0.17.0]
+
+## Changes
+
+- **`locations.analysis_results` chooses where reports live.** A path or
+  `file://` stays on local disk; an `s3://` / `gs://` URI goes through fsspec
+  (`traust-engine[s3]` / `[gcs]`, configured by the existing `HARNESS_S3_*`
+  env). New `report_store.open_backend(location)` picks the backend and
+  `FsspecBackend` implements it; `engine.corpus.report_store()` and
+  `corpus.precedent` use it instead of hard-coding `LocalBackend`.
+  `storage.filesystem(uri)` is public, and a missing scheme driver is a
+  `StorageError` naming the extra rather than fsspec's `ImportError`.
+- Remote `analysis_results` covers verified reads and writes through
+  `ReportStore`; ingest and resolution still walk a local tree.
+- `FsspecBackend` failures are `StorageError`, never "absent": `exists()` no
+  longer returns `False` on bad credentials or an unreachable endpoint,
+  `list()` wraps backend errors, and a missing bucket fails at construction
+  instead of reading as "report not found". Only writable schemes (`s3`,
+  `gs`/`gcs`, `az`/`abfs`) are accepted as a report location; `http(s)://` is
+  refused up front. `SoundnessResolver` refuses a remote `analysis_results`
+  (precedent resolution is local-only) instead of treating `s3://b/p` as a
+  local folder.
+- Pins: traust-contracts 0.44.0 (from 0.35.0), traust-ledger 0.8.2 (from
+  0.6.32). 0.8.2 makes `LedgerClient.restate()` usable in-process (0.8.0/0.8.1
+  always refused it) and pins SDK OIDC verification to the configured issuer.
+- **`LedgerService.restate()`**: the only way to overwrite a signed
+  `claim_hashes` / `audit_report_sha256` / `artifact_digests` value. The prior
+  value, verified actor, ticket and rationale are recorded in the layer.
+  `patch_layer_file` still does first writes and new keys only.
+- `LedgerService.stamp_report_file()` pins `audit_report_sha256` once and
+  returns `False` when it's unchanged. It refuses to overwrite a different
+  pinned digest (use `restate`) instead of re-patching unconditionally, which
+  ledger ≥0.8 refuses mid-write.
+- **Consumers: ledger writes now need a verifiable identity.** Ledger ≥0.7
+  verifies the actor before `sign()` / `patch_metadata()` /
+  `stamp_event_identities()`, so a placeholder token (`token="test-token"`)
+  is refused. Configure OIDC (`LEDGER_OIDC_ISSUER` / `LEDGER_OIDC_JWKS_URL`)
+  or local auth (`LEDGER_LOCAL_IDENTITY`, or `ledger auth local`); test
+  suites can set `LEDGER_LOCAL_IDENTITY` in an isolated `HOME`. Ledger 0.8
+  also refuses to sign a layer without an initialized shell (`audit_report`,
+  `repository`, `created`, `harness_version`). `finding_identity.rebaseline`
+  is unchanged; its tests now supply a verifier, a complete layer shell, and
+  sha256-shaped claim hashes.
+
 ## [0.3.0]
 
 ## Changes
