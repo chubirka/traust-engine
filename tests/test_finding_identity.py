@@ -29,6 +29,23 @@ def _report(repo, findings):
     return {"metadata": {"repository": repo}, "findings": findings}
 
 
+# Claim hashes are sha256 hex; the ledger rejects anything else.
+H1, H2 = "1" * 64, "2" * 64
+
+
+def _layer_shell(**metadata) -> str:
+    """A complete layer shell. Since traust-ledger 0.8 the ledger refuses to
+    sign a layer whose metadata lacks audit_report, repository, created or
+    harness_version, or that has no needs_review list."""
+    base = {
+        "audit_report": "repo-security-audit.json",
+        "repository": "https://example.test/repo",
+        "created": "2026-01-01T00:00:00+00:00",
+        "harness_version": "0.0.0",
+    }
+    return json.dumps({"metadata": {**base, **metadata}, "events": [], "needs_review": []})
+
+
 def test_fingerprint_stable_across_scan_artifacts():
     a = _finding(
         "REPO-abc1234-001",
@@ -128,7 +145,7 @@ def test_rebaseline_writes_aliases_and_reviews(tmp_path):
     po, pn, pl = tmp_path / "old.json", tmp_path / "new.json", tmp_path / "layer.json"
     po.write_text(json.dumps(old))
     pn.write_text(json.dumps(new))
-    pl.write_text(json.dumps({"metadata": {}, "events": [], "needs_review": []}))
+    pl.write_text(_layer_shell())
 
     r = fi.rebaseline(po, pn, pl, ledger_service=_ledger(tmp_path))
     layer = json.loads(pl.read_text())
@@ -163,15 +180,9 @@ def test_rebaseline_migrates_superseded_claim_pins(tmp_path):
     po.write_text(json.dumps(old))
     pn.write_text(json.dumps(new))
     pl.write_text(
-        json.dumps(
-            {
-                "metadata": {
-                    "audit_commit": "aaa1111" + "0" * 33,
-                    "claim_hashes": {"FIND-001": "h1", "FIND-002": "h2"},
-                },
-                "events": [],
-                "needs_review": [],
-            }
+        _layer_shell(
+            audit_commit="aaa1111" + "0" * 33,
+            claim_hashes={"FIND-001": H1, "FIND-002": H2},
         )
     )
 
@@ -199,16 +210,12 @@ def test_rebaseline_batch_mode_keeps_unmatched_pins(tmp_path):
     pl = tmp_path / "layer.json"
     po.write_text(json.dumps(old))
     pn.write_text(json.dumps(new))
-    pl.write_text(
-        json.dumps(
-            {"metadata": {"claim_hashes": {"FIND-002": "h2"}}, "events": [], "needs_review": []}
-        )
-    )
+    pl.write_text(_layer_shell(claim_hashes={"FIND-002": H2}))
 
     r = fi.rebaseline(po, pn, pl, queue_reviews=False, ledger_service=_ledger(tmp_path))
     layer = json.loads(pl.read_text())
     assert r["migrated_claims"] == []
-    assert layer["metadata"]["claim_hashes"] == {"FIND-002": "h2"}
+    assert layer["metadata"]["claim_hashes"] == {"FIND-002": H2}
 
 
 # --- P9 / P9b: rebaseline owes a stamp, and must not write outside the tree ---
@@ -228,7 +235,7 @@ def _rebaseline_fixture(tmp_path):
     po, pn, pl = tmp_path / "old.json", tmp_path / "new.json", tmp_path / "layer.json"
     po.write_text(json.dumps(old))
     pn.write_text(json.dumps(new))
-    pl.write_text(json.dumps({"metadata": {}, "events": [], "needs_review": []}))
+    pl.write_text(_layer_shell())
     return po, pn, pl
 
 
@@ -256,7 +263,7 @@ def test_rebaseline_refuses_a_layer_outside_the_tree(tmp_path):
 
     po, pn, _ = _rebaseline_fixture(tmp_path)
     outside = tmp_path.parent / "escaped-layer.json"
-    outside.write_text(json.dumps({"metadata": {}, "events": [], "needs_review": []}))
+    outside.write_text(_layer_shell())
 
     try:
         fi.rebaseline(po, pn, outside, findings_root=tmp_path, ledger_service=_ledger(tmp_path))

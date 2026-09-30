@@ -2,6 +2,23 @@
 
 All notable changes to traust-engine are documented here.
 
+## [0.17.0]
+
+### Changed
+
+- **Dependencies caught up:** traust-contracts v0.35.0 → **v0.44.0** and
+  traust-ledger v0.6.32 → **v0.8.1**. The pins had stayed at the 2026-09-22
+  storage-revert versions while both packages released ten minor versions.
+- **Test identity.** The test suite now mints a real locally-signed machine
+  token, because ledger 0.8 verifies the caller's token when it signs a
+  layer, and the old unsigned placeholder is rejected. `HOME` points at a
+  session directory, so the suite never picks up a developer's stored
+  `ledger auth login` credential. The grype and osv-scanner database caches
+  stay pointed at the real home.
+- **Rebaseline test fixtures** build complete layer shells, meeting ledger
+  0.8's validation: required metadata, a valid `harness_version`, and sha256
+  claim hashes.
+
 ## [0.3.0]
 
 ## Changes

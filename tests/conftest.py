@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import base64
-import json
 import os
 import shutil
 import subprocess
@@ -38,15 +36,29 @@ os.environ["TRAUST_CONFIG_HOME"] = str(_TEST_HOME)
 os.environ.setdefault("ANALYSIS_RESULTS_DIR", str(_FIXTURES / "analysis-results"))
 
 
-# Unsigned (alg=none) JWT-shaped token for the test session, assembled at runtime
-# so no token-shaped literal sits in the tree for forge secret scanners.
-def _seg(o):
-    raw = json.dumps(o, separators=(",", ":")).encode()
-    return base64.urlsafe_b64encode(raw).decode().rstrip("=")
-
-
+# A hermetic ledger identity for the test session. Since traust-ledger 0.8 the
+# SDK VERIFIES the caller's token when it signs a layer, so an unsigned
+# (alg=none) placeholder no longer works: a token without the local issuer is
+# treated as OIDC and rejected. The suite therefore mints a real locally-signed
+# machine token whose JWKS the verifier can find. HOME points at a session
+# directory, so the suite also never picks up a developer's stored
+# `ledger auth login` credential from ~/.config/traust-ledger.
+# Scanner databases are large downloads cached under the real home; keep the
+# toolchain tests pointed at them rather than at the empty session home.
+_REAL_HOME = Path.home()
+os.environ.setdefault("GRYPE_DB_CACHE_DIR", str(_REAL_HOME / ".cache" / "grype" / "db"))
 os.environ.setdefault(
-    "LAAS_TOKEN", f"{_seg({'typ': 'JWT', 'alg': 'none'})}.{_seg({'sub': 'test'})}."
+    "OSV_SCANNER_LOCAL_DB_CACHE_DIRECTORY", str(_REAL_HOME / ".cache" / "osv-scanner")
+)
+_TEST_USER_HOME = Path(tempfile.mkdtemp(prefix="traust-engine-tests-home-"))
+os.environ["HOME"] = str(_TEST_USER_HOME)
+
+from traust_ledger.auth.local import ensure_local_keypair, mint_local_token
+
+os.environ["LAAS_TOKEN"] = mint_local_token(
+    "traust-engine-tests",
+    ensure_local_keypair(_TEST_USER_HOME / ".config" / "traust-ledger"),
+    machine=True,
 )
 
 from traust_contracts import load_context
