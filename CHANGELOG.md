@@ -16,10 +16,23 @@ All notable changes to traust-engine are documented here.
   `StorageError` naming the extra rather than fsspec's `ImportError`.
 - Remote `analysis_results` covers verified reads and writes through
   `ReportStore`; ingest and resolution still walk a local tree.
+- `FsspecBackend` failures are `StorageError`, never "absent": `exists()` no
+  longer returns `False` on bad credentials or an unreachable endpoint,
+  `list()` wraps backend errors, and a missing bucket fails at construction
+  instead of reading as "report not found". Only writable schemes (`s3`,
+  `gs`/`gcs`, `az`/`abfs`) are accepted as a report location; `http(s)://` is
+  refused up front. `SoundnessResolver` refuses a remote `analysis_results`
+  (precedent resolution is local-only) instead of treating `s3://b/p` as a
+  local folder.
 - Pins: traust-contracts 0.44.0 (from 0.35.0), traust-ledger 0.8.1 (from
   0.6.32).
-- Ledger 0.8 verifies the actor before `sign()` / `patch_metadata()` and
-  refuses to sign a layer without an initialized shell (`audit_report`,
+- **Consumers: ledger writes now need a verifiable identity.** Ledger ≥0.7
+  verifies the actor before `sign()` / `patch_metadata()` /
+  `stamp_event_identities()`, so a placeholder token (`token="test-token"`)
+  is refused. Configure OIDC (`LEDGER_OIDC_ISSUER` / `LEDGER_OIDC_JWKS_URL`)
+  or local auth (`LEDGER_LOCAL_IDENTITY`, or `ledger auth local`); test
+  suites can set `LEDGER_LOCAL_IDENTITY` in an isolated `HOME`. Ledger 0.8
+  also refuses to sign a layer without an initialized shell (`audit_report`,
   `repository`, `created`, `harness_version`). `finding_identity.rebaseline`
   is unchanged; its tests now supply a verifier, a complete layer shell, and
   sha256-shaped claim hashes.

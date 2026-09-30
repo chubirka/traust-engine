@@ -318,3 +318,65 @@ def test_to_ref_does_not_dereference_symlinks(tmp_path):
 def test_to_ref_leaves_a_path_outside_the_root_alone(tmp_path):
     assert to_ref("/etc/passwd", tmp_path) == "/etc/passwd"
     assert to_ref(None, tmp_path) is None
+
+
+# --- remote failures are StorageError, never "absent" (PR #13 review) ---------
+
+
+class _BrokenFs:
+    """Stands in for s3fs with a wrong secret or a dead endpoint: every call raises."""
+
+    protocol = "memory"
+
+    def __init__(self, exc: Exception) -> None:
+        self._exc = exc
+
+    def info(self, path):
+        raise self._exc
+
+    def find(self, path):
+        raise self._exc
+
+
+@pytest.mark.parametrize("exc", [PermissionError("denied"), ConnectionError("endpoint down")])
+def test_fsspec_exists_raises_storage_error_instead_of_false(memory_root, exc):
+    backend = FsspecBackend(memory_root)
+    backend._fs = _BrokenFs(exc)
+    with pytest.raises(storage.StorageError, match="exists failed"):
+        backend.exists("a.json")
+
+
+@pytest.mark.parametrize("exc", [PermissionError("denied"), ConnectionError("endpoint down")])
+def test_fsspec_list_raises_storage_error(memory_root, exc):
+    backend = FsspecBackend(memory_root)
+    backend._fs = _BrokenFs(exc)
+    with pytest.raises(storage.StorageError, match="list failed"):
+        backend.list()
+
+
+def test_fsspec_exists_is_false_only_for_a_missing_object(memory_root):
+    backend = FsspecBackend(memory_root)
+    assert backend.exists("missing.json") is False
+    backend.write("present.json", b"{}")
+    assert backend.exists("present.json") is True
+
+
+class _S3LikeFs(_BrokenFs):
+    protocol = ("s3", "s3a")
+
+
+@pytest.mark.parametrize(
+    ("exc", "message"),
+    [(FileNotFoundError("NoSuchBucket"), "not found"), (PermissionError("denied"), "cannot reach")],
+)
+def test_fsspec_backend_checks_the_bucket_once(monkeypatch, exc, message):
+    """A bucket typo would otherwise read as 'report not found' on every get."""
+    monkeypatch.setattr(storage, "_fs", lambda uri: (_S3LikeFs(exc), "bucket-typo/results"))
+    with pytest.raises(storage.StorageError, match=message):
+        FsspecBackend("s3://bucket-typo/results")
+
+
+@pytest.mark.parametrize("location", ["https://host/results", "http://host/results"])
+def test_open_backend_refuses_a_read_only_scheme(location):
+    with pytest.raises(storage.StorageError, match="not a writable report location"):
+        open_backend(location)

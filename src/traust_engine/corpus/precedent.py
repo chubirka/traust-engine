@@ -92,6 +92,7 @@ from pathlib import Path
 
 from traust_contracts.config import CorpusConfig
 
+from traust_engine import storage
 from traust_engine._util.actor import is_actor_verified as _actor_is_verified
 from traust_engine._util.finding_identity import (
     canon_path,
@@ -290,6 +291,14 @@ class SoundnessResolver:
     traust.ops.lint_refutation_soundness). Reports are parsed once."""
 
     def __init__(self, analysis_results: Path):
+        # load_resolution walks a local tree, so a remote location cannot work here.
+        # Refuse it before Path() mangles "s3://b/p" into the relative "s3:/b/p",
+        # which open_backend would otherwise take as a local folder named "s3:".
+        raw = str(analysis_results)
+        if "://" in raw or raw.split("/", 1)[0].endswith(":"):
+            raise storage.StorageError(
+                f"precedent cache needs a local analysis_results, got {raw!r}"
+            )
         self.root = Path(analysis_results)
         self.store = report_store.ReportStore(report_store.open_backend(self.root))
         self._reports: dict[str, dict | None] = {}
