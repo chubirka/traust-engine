@@ -24,8 +24,17 @@ All notable changes to traust-engine are documented here.
   refused up front. `SoundnessResolver` refuses a remote `analysis_results`
   (precedent resolution is local-only) instead of treating `s3://b/p` as a
   local folder.
-- Pins: traust-contracts 0.44.0 (from 0.35.0), traust-ledger 0.8.1 (from
-  0.6.32).
+- Pins: traust-contracts 0.44.0 (from 0.35.0), traust-ledger 0.8.2 (from
+  0.6.32). 0.8.2 makes `LedgerClient.restate()` usable in-process (0.8.0/0.8.1
+  always refused it) and pins SDK OIDC verification to the configured issuer.
+- **`LedgerService.restate()`**: the only way to overwrite a signed
+  `claim_hashes` / `audit_report_sha256` / `artifact_digests` value. The prior
+  value, verified actor, ticket and rationale are recorded in the layer.
+  `patch_layer_file` still does first writes and new keys only.
+- `LedgerService.stamp_report_file()` pins `audit_report_sha256` once and
+  returns `False` when it's unchanged. It refuses to overwrite a different
+  pinned digest (use `restate`) instead of re-patching unconditionally, which
+  ledger ≥0.8 refuses mid-write.
 - **Consumers: ledger writes now need a verifiable identity.** Ledger ≥0.7
   verifies the actor before `sign()` / `patch_metadata()` /
   `stamp_event_identities()`, so a placeholder token (`token="test-token"`)
