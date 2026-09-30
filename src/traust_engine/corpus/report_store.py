@@ -35,6 +35,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import posixpath
 import sqlite3
 from collections.abc import Iterable
 from pathlib import Path
@@ -42,6 +43,7 @@ from typing import Protocol
 
 from traust_contracts.config import CorpusConfig
 
+from traust_engine import storage
 from traust_engine.corpus.resolver import (
     ReportRecord,
     Resolution,
@@ -52,10 +54,12 @@ from traust_engine.corpus.resolver import (
 
 __all__ = [
     "DigestMismatch",
+    "FsspecBackend",
     "LocalBackend",
     "MemoryBackend",
     "ReportStore",
     "load_resolution",
+    "open_backend",
     "to_ref",
 ]
 
@@ -131,6 +135,65 @@ class MemoryBackend:
 
     def list(self, prefix: str = "") -> Iterable[str]:
         return sorted(r for r in self._data if r.startswith(prefix))
+
+
+class FsspecBackend:
+    """Refs are keys under a remote root (``s3://bucket/prefix``), same shape as
+    `LocalBackend`'s relative paths. Object stores have no symlinks, so containment
+    is lexical: absolute refs and ``..`` segments are rejected."""
+
+    def __init__(self, root: str) -> None:
+        self.root = root.rstrip("/")
+        self._fs, base = storage.filesystem(self.root)
+        self._base = base.rstrip("/")
+
+    def _path(self, ref: str) -> str:
+        norm = posixpath.normpath(ref)
+        if ref.startswith("/") or norm in (".", "..") or norm.startswith("../"):
+            raise ValueError(f"ref {ref!r} resolves outside {self.root}")
+        return f"{self._base}/{norm}"
+
+    def read(self, ref: str) -> bytes:
+        path = self._path(ref)
+        try:
+            return self._fs.cat_file(path)
+        except FileNotFoundError:
+            raise
+        except Exception as e:
+            raise storage.StorageError(f"read failed for {self.root}/{ref}: {e}") from e
+
+    def write(self, ref: str, data: bytes) -> None:
+        path = self._path(ref)
+        try:
+            self._fs.pipe_file(path, data)
+        except Exception as e:
+            raise storage.StorageError(f"write failed for {self.root}/{ref}: {e}") from e
+
+    def exists(self, ref: str) -> bool:
+        try:
+            return bool(self._fs.isfile(self._path(ref)))
+        except ValueError:
+            return False
+
+    def list(self, prefix: str = "") -> Iterable[str]:
+        head = f"{self._base}/"
+        refs = (p[len(head) :] for p in self._fs.find(self._base) if p.startswith(head))
+        return sorted(r for r in refs if r.startswith(prefix))
+
+
+def open_backend(location: str | os.PathLike) -> Backend:
+    """The `Backend` for a location value (``locations.analysis_results``).
+
+    A bare path or ``file://`` is a `LocalBackend` and imports nothing; a remote URI
+    (``s3://``, ``gs://``, ...) is an `FsspecBackend`. Consumers take the store from
+    ``engine.corpus.report_store()`` rather than choosing a backend themselves.
+    """
+    s = str(location)
+    if storage.is_remote(s):
+        return FsspecBackend(s)
+    if "://" in s and not s.startswith("file://"):
+        raise storage.StorageError(f"unsupported storage location scheme: {s!r}")
+    return LocalBackend(Path(s.removeprefix("file://")))
 
 
 class ReportStore:

@@ -2,6 +2,28 @@
 
 All notable changes to traust-engine are documented here.
 
+## [0.17.0]
+
+## Changes
+
+- **`locations.analysis_results` chooses where reports live.** A path or
+  `file://` stays on local disk; an `s3://` / `gs://` URI goes through fsspec
+  (`traust-engine[s3]` / `[gcs]`, configured by the existing `HARNESS_S3_*`
+  env). New `report_store.open_backend(location)` picks the backend and
+  `FsspecBackend` implements it; `engine.corpus.report_store()` and
+  `corpus.precedent` use it instead of hard-coding `LocalBackend`.
+  `storage.filesystem(uri)` is public, and a missing scheme driver is a
+  `StorageError` naming the extra rather than fsspec's `ImportError`.
+- Remote `analysis_results` covers verified reads and writes through
+  `ReportStore`; ingest and resolution still walk a local tree.
+- Pins: traust-contracts 0.44.0 (from 0.35.0), traust-ledger 0.8.1 (from
+  0.6.32).
+- Ledger 0.8 verifies the actor before `sign()` / `patch_metadata()` and
+  refuses to sign a layer without an initialized shell (`audit_report`,
+  `repository`, `created`, `harness_version`). `finding_identity.rebaseline`
+  is unchanged; its tests now supply a verifier, a complete layer shell, and
+  sha256-shaped claim hashes.
+
 ## [0.3.0]
 
 ## Changes

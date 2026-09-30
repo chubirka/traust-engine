@@ -10,18 +10,24 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
+import sys
+import uuid
 from dataclasses import asdict
 from pathlib import Path
 
 import pytest
 from traust_contracts import CorpusConfig
 
+from traust_engine import storage
 from traust_engine.corpus.report_store import (
     DigestMismatch,
+    FsspecBackend,
     LocalBackend,
     MemoryBackend,
     ReportStore,
     load_resolution,
+    open_backend,
     to_ref,
 )
 from traust_engine.corpus.resolver import resolve
@@ -112,6 +118,109 @@ def test_local_backend_round_trips(tmp_path):
     store.put(b'{"a": 1}', "sub/dir/r.json")
     assert store.exists("sub/dir/r.json")
     assert store.get_json("sub/dir/r.json") == {"a": 1}
+
+
+# --- backend selection -------------------------------------------------------
+# Remote is exercised against fsspec's in-process memory filesystem: real fsspec
+# semantics, no network, no bucket.
+
+
+@pytest.fixture()
+def memory_root():
+    fsspec = pytest.importorskip("fsspec")
+    root = f"memory://bucket-{uuid.uuid4().hex}/results"
+    yield root
+    fs, path = fsspec.core.url_to_fs(root)
+    if fs.exists(path):
+        fs.rm(path, recursive=True)
+
+
+def test_fsspec_backend_round_trips(memory_root):
+    payload = b'{"a": 1}'
+    store = ReportStore(FsspecBackend(memory_root))
+    store.put(payload, "findings/repo/r.json")
+    store.put(b"{}", "graph/other.json")
+    assert store.exists("findings/repo/r.json")
+    assert not store.exists("findings/repo/missing.json")
+    assert store.get_json(
+        "findings/repo/r.json", expect_sha256=hashlib.sha256(payload).hexdigest()
+    ) == {"a": 1}
+    assert store.list() == ["findings/repo/r.json", "graph/other.json"]
+    assert store.list("findings/") == ["findings/repo/r.json"]
+
+
+def test_fsspec_backend_verifies_the_digest(memory_root):
+    store = ReportStore(FsspecBackend(memory_root))
+    store.put(b"substituted", "r.json")
+    with pytest.raises(DigestMismatch):
+        store.get("r.json", expect_sha256=hashlib.sha256(b"original").hexdigest())
+
+
+def test_fsspec_backend_missing_ref_is_file_not_found(memory_root):
+    with pytest.raises(FileNotFoundError):
+        FsspecBackend(memory_root).read("nope.json")
+
+
+@pytest.mark.parametrize("ref", ["../outside.json", "a/../../outside.json", "/abs.json", ".."])
+def test_fsspec_backend_refuses_a_ref_escaping_the_root(memory_root, ref):
+    backend = FsspecBackend(memory_root)
+    with pytest.raises(ValueError):
+        backend.read(ref)
+    with pytest.raises(ValueError):
+        backend.write(ref, b"x")
+    assert not backend.exists(ref)
+
+
+def test_open_backend_local_path_imports_no_remote_driver(tmp_path, monkeypatch):
+    monkeypatch.delitem(sys.modules, "fsspec", raising=False)
+    assert isinstance(open_backend(tmp_path), LocalBackend)
+    assert isinstance(open_backend(f"file://{tmp_path}"), LocalBackend)
+    assert open_backend(f"file://{tmp_path}").root == tmp_path
+    assert "fsspec" not in sys.modules
+
+
+@pytest.fixture()
+def s3_as_memory(memory_root, monkeypatch):
+    """``s3://`` URIs served by the memory filesystem, through storage's own seam."""
+    import fsspec
+
+    monkeypatch.setattr(
+        storage, "_fs", lambda uri: fsspec.core.url_to_fs(uri.replace("s3://", "memory://"))
+    )
+    return memory_root.replace("memory://", "s3://")
+
+
+def test_open_backend_remote_uri_is_fsspec(s3_as_memory):
+    backend = open_backend(s3_as_memory + "/")
+    assert isinstance(backend, FsspecBackend)
+    assert backend.root == s3_as_memory
+
+
+def test_open_backend_rejects_an_unknown_scheme():
+    with pytest.raises(storage.StorageError, match="unsupported"):
+        open_backend("ftp://host/results")
+
+
+def test_open_backend_names_the_extra_when_fsspec_is_missing(monkeypatch):
+    monkeypatch.setitem(sys.modules, "fsspec", None)
+    with pytest.raises(storage.StorageError, match=r"traust-engine\[remote\]"):
+        open_backend("s3://bucket/results")
+
+
+def test_corpus_report_store_follows_locations(tmp_path, s3_as_memory):
+    import yaml
+
+    from traust_engine import HarnessEngine
+
+    home = tmp_path / "cfg"
+    shutil.copytree(Path(__file__).parent / "fixtures" / "config", home)
+    (home / "locations.yaml").write_text(
+        yaml.safe_dump({"analysis_results": s3_as_memory}), encoding="utf-8"
+    )
+    engine = HarnessEngine.load(config_home=home)
+    engine.corpus.report_store().put(b"{}", "r.json")
+    assert FsspecBackend(s3_as_memory).exists("r.json")
+    assert isinstance(engine.corpus.report_store(results_root=tmp_path).backend, LocalBackend)
 
 
 # --- enumeration ------------------------------------------------------------

@@ -1924,7 +1924,7 @@ dependencies = [
 
 [[package]]
 name = "traust-engine"
-version = "0.16.0"
+version = "0.17.0"
 source = { editable = "." }
 dependencies = [
     { name = "jsonschema" },
@@ -1959,6 +1959,7 @@ signing = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "fsspec" },
     { name = "pytest" },
     { name = "ruff" },
     { name = "vulture" },
@@ -1987,6 +1988,7 @@ provides-extras = ["graph", "signing", "remote", "s3", "gcs"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "fsspec", specifier = ">=2024.2" },
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "ruff", specifier = ">=0.6" },
     { name = "vulture", specifier = ">=2.16" },

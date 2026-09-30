@@ -291,7 +291,7 @@ class SoundnessResolver:
 
     def __init__(self, analysis_results: Path):
         self.root = Path(analysis_results)
-        self.store = report_store.ReportStore(report_store.LocalBackend(self.root))
+        self.store = report_store.ReportStore(report_store.open_backend(self.root))
         self._reports: dict[str, dict | None] = {}
         self._install_failed: dict[str, bool] = {}
 
@@ -405,7 +405,7 @@ def build_cache(
     taxonomy_path: Path | None = None,
 ) -> dict:
     res = report_store.load_resolution(analysis_results, cfg)
-    store = report_store.ReportStore(report_store.LocalBackend(analysis_results))
+    store = report_store.ReportStore(report_store.open_backend(analysis_results))
     if taxonomy_path is None:
         cand = Path(analysis_results) / DEFAULT_TAXONOMY_REL
         taxonomy_path = cand if cand.is_file() else None

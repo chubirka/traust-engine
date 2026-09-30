@@ -16,7 +16,9 @@ from traust_engine.corpus import findings_db, precedent, report_store, resolver
 from traust_engine.locations import (
     FINDINGS_DB_REL,
     FP_PRECEDENT_CACHE_REL,
+    analysis_results_location,
     progress_tracker_dir,
+    require,
 )
 
 
@@ -73,8 +75,16 @@ class CorpusOps(ContextOps):
         )
 
     def report_store(self, results_root: Path | None = None) -> report_store.ReportStore:
-        """Accessor for report JSON under the configured (or overridden) results root."""
-        return report_store.ReportStore(report_store.LocalBackend(self._results_root(results_root)))
+        """Accessor for report JSON under the configured (or overridden) results root.
+
+        The backend follows ``locations.analysis_results``: a path is local, an
+        ``s3://``-style URI is remote.
+        """
+        if results_root is None:
+            location = require(analysis_results_location(self._loc), "analysis_results")
+        else:
+            location = results_root
+        return report_store.ReportStore(report_store.open_backend(location))
 
     def to_ref(self, value: str | None, results_root: Path | None = None) -> str | None:
         """Relativize an artifact path against the corpus root (symlink-safe)."""

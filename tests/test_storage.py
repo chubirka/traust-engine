@@ -100,6 +100,18 @@ def test_missing_backend_names_the_install(monkeypatch):
     assert "s3" in msg
 
 
+def test_missing_scheme_driver_names_the_extra(monkeypatch):
+    """fsspec installed, s3fs not: still a StorageError, not fsspec's ImportError."""
+    fsspec = pytest.importorskip("fsspec")
+
+    def no_driver(uri, **_):
+        raise ImportError("Install s3fs to access S3")
+
+    monkeypatch.setattr(fsspec.core, "url_to_fs", no_driver)
+    with pytest.raises(storage.StorageError, match=r"traust-engine\[s3\]"):
+        storage.filesystem("s3://bucket/results")
+
+
 # --- config resolution ---------------------------------------------------
 
 

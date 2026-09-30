@@ -47,6 +47,7 @@ __all__ = [
     "StorageError",
     "cache_dir",
     "exists",
+    "filesystem",
     "is_remote",
     "localize",
     "read_bytes",
@@ -140,7 +141,20 @@ def _fs(uri: str):
             f"e.g. s3fs / gcsfs). Local paths and file:// need nothing."
         ) from e
     scheme = uri.split("://", 1)[0]
-    return fsspec.core.url_to_fs(uri, **storage_options(scheme))
+    try:
+        return fsspec.core.url_to_fs(uri, **storage_options(scheme))
+    except ImportError as e:
+        # fsspec is present but the scheme's driver (s3fs, gcsfs, ...) is not.
+        raise StorageError(
+            f"remote storage location {uri!r} needs the {scheme} driver: "
+            f"pip install 'traust-engine[s3]' (or [gcs], or the matching fsspec driver)"
+        ) from e
+
+
+def filesystem(uri: str):
+    """``(fs, path)`` for a remote URI — the fsspec filesystem with this module's
+    options applied (``HARNESS_S3_*``, ``HARNESS_STORAGE_OPTIONS``)."""
+    return _fs(uri)
 
 
 def _validator(uri: str) -> str:
