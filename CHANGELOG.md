@@ -2,6 +2,31 @@
 
 All notable changes to traust-engine are documented here.
 
+## [0.18.0]
+
+## Changes
+
+- **Threat models rated with the OWASP Risk Rating Methodology.** Pins
+  traust-contracts v0.45.0, whose threat schema adds `risk_rating`, and
+  traust-ledger 0.8.3 (the same contracts pin). The arithmetic stays in
+  `traust_contracts.v1.risk_rating`. The new `reporting/threat_rating.py` owns
+  how a rating is written in Markdown and read back:
+  - `render` gives a rated model `severity | likelihood | impact` columns
+    (`high | medium 4.375 | high 7.25 technical`) and a section 11,
+    "Risk ratings", with every factor score and its reason. A threat not yet
+    re-rated shows `unrated | legacy <label> | legacy <label>`. Legacy models
+    render exactly as before.
+  - `lint` accepts the rated variant. It checks that each level matches its
+    score and that severity follows from the levels, and it recomputes every
+    rating from its section 11 factors.
+  - `corpus.threat_model.parse_threats` returns `severity` and
+    `severity_source`, plus the scores and basis for rated rows. It drops the
+    home-grown `score` (impact weight × likelihood weight).
+  - Legacy labels are ordered on the OWASP table by a fixed crosswalk until
+    each model is re-rated. The crosswalk is used only for ordering, is never
+    written back as a rating, and is reported as
+    `severity_source: legacy-crosswalk`.
+
 ## [0.17.0]
 
 ## Changes

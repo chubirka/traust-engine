@@ -19,18 +19,12 @@ import re
 from pathlib import Path
 from typing import Any
 
+from traust_engine.reporting import threat_rating
 from traust_engine.reporting.lint import (
     THREATS_COLUMN_VARIANTS,
     parse_sections,
     parse_table,
 )
-
-#: Ordering weights. The product is a TRIAGE ORDER, never a calibrated risk
-#: value and never comparable to CVSS. Enums come from the threat-model
-#: schema (harnessing/2-threat-model/threat-model/schema.md), which states
-#: that the section headings, column order and enum values ARE a contract.
-IMPACT_W = {"low": 1, "medium": 2, "high": 4, "critical": 8, "existential": 16}
-LIKELIHOOD_W = {"very_rare": 1, "rare": 2, "possible": 4, "likely": 8, "almost_certain": 16}
 
 
 def _split(value: str) -> list[str]:
@@ -67,6 +61,10 @@ def parse_threats(path: Path, root: Path, subject_id: str | None = None) -> dict
         if len(row_values) != len(columns):
             continue
         row = dict(zip(columns, row_values, strict=False))
+        # Severity is the OWASP Risk Rating Methodology severity; a threat
+        # not yet re-rated is ORDERED by the legacy crosswalk and says so in
+        # severity_source (reporting/threat_rating.py).
+        rating = threat_rating.parse_row(row)
         threat = {
             "key": f"{product}/{slug}:{row['id']}",
             "id": row["id"],
@@ -76,17 +74,20 @@ def parse_threats(path: Path, root: Path, subject_id: str | None = None) -> dict
             "actors": _split(row.get("actor", "")),
             "surface": row.get("surface", ""),
             "asset": row.get("asset", ""),
-            "impact": row.get("impact", ""),
-            "likelihood": row.get("likelihood", ""),
+            "severity": rating["severity"],
+            "severity_source": rating["severity_source"],
+            "impact": rating["impact"],
+            "likelihood": rating["likelihood"],
             "status": row.get("status", ""),
             "controls": row.get("controls", ""),
             "evidence": _split(row.get("evidence", "")),
             # Rows from the optional LINDDUN privacy overlay carry a
             # leading `linddun:` tag in the threat cell (schema.md S4).
             "linddun": row["threat"].lower().startswith("linddun:"),
-            "score": IMPACT_W.get(row.get("impact", ""), 0)
-            * LIKELIHOOD_W.get(row.get("likelihood", ""), 0),
         }
+        for key in ("likelihood_score", "impact_score", "impact_basis"):
+            if key in rating:
+                threat[key] = rating[key]
         if subject_id:
             threat["subject_id"] = subject_id
         # Column 11, DEFAULT since harness 0.82.0 and the input to the

@@ -11,6 +11,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from traust_engine.reporting import threat_rating
+
 try:
     from traust_contracts.models import Report
 
@@ -489,6 +491,24 @@ THREAT_COLUMNS = (
     "attack_refs",
 )
 
+#: Section 4 columns for a model rated with the OWASP Risk Rating
+#: Methodology: `severity | likelihood | impact` replace the legacy
+#: `impact | likelihood` pair. Used when any threat carries `risk_rating`.
+THREAT_COLUMNS_OWASP = (
+    "id",
+    "threat",
+    "actor",
+    "surface",
+    "asset",
+    "severity",
+    "likelihood",
+    "impact",
+    "status",
+    "controls",
+    "evidence",
+    "attack_refs",
+)
+
 
 def _tm_cell(value) -> str:
     """One table cell. Lists join with ', '; a pipe would break the row."""
@@ -524,7 +544,10 @@ def render_threat_model(document: dict) -> str:
     lossless and a bootstrap model still does not look reviewed.
     """
     threats = document.get("threats") or []
-    columns = THREAT_COLUMNS
+    rated = [t for t in threats if t.get("risk_rating")]
+    columns = THREAT_COLUMNS_OWASP if rated else THREAT_COLUMNS
+    if rated:
+        threats = [{**t, **threat_rating.threat_cells(t)} for t in threats]
     if any(t.get("isolation_dimensions") for t in threats):
         columns = (*columns, "isolation_dimensions")
 
@@ -610,6 +633,23 @@ def render_threat_model(document: dict) -> str:
             boundaries,
         )
         lines += [""]
+
+    if rated:
+        lines += ["## 11. Risk ratings", ""]
+        lines += [
+            "Rated with the [OWASP Risk Rating Methodology]"
+            f"({threat_rating.rr.SOURCE}) (OWASP Foundation, CC BY-SA 4.0). "
+            "Each factor is scored 0-9; likelihood and impact are the means "
+            "of their factors.",
+            "",
+        ]
+        for threat in rated:
+            rating = threat["risk_rating"]
+            lines += [f"### {threat.get('id', '')} — {rating['severity']}", ""]
+            lines += _tm_table(
+                tuple(threat_rating.FACTOR_COLUMNS), threat_rating.factor_rows(rating)
+            )
+            lines += [""]
 
     history = document.get("update_history") or []
     if history:
