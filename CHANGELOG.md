@@ -19,6 +19,8 @@ All notable changes to traust-engine are documented here.
   - `lint` accepts the rated variant. It checks that each level matches its
     score and that severity follows from the levels, and it recomputes every
     rating from its section 11 factors.
+  - `validate` rejects a threat-model JSON whose rating scores, levels or
+    severity disagree with its factors, which a JSON Schema can't express.
   - `corpus.threat_model.parse_threats` returns `severity` and
     `severity_source`, plus the scores and basis for rated rows. It drops the
     home-grown `score` (impact weight × likelihood weight).

@@ -98,6 +98,17 @@ class TestSchema(unittest.TestCase):
         result = self._validate(document(rated_threat()))
         self.assertTrue(result.passed, result.errors)
 
+    def test_derived_values_that_disagree_with_the_factors_fail(self):
+        threat = rated_threat()
+        threat["risk_rating"]["severity"] = "critical"
+        threat["risk_rating"]["likelihood"]["score"] = 7
+        result = self._validate(document(threat))
+        self.assertFalse(result.passed)
+        self.assertTrue(
+            any("T1" in e and "likelihood.score is 7" in e for e in result.errors), result.errors
+        )
+        self.assertTrue(any("severity is 'critical'" in e for e in result.errors), result.errors)
+
     def test_threat_with_neither_rating_fails(self):
         threat = rated_threat()
         del threat["risk_rating"]
