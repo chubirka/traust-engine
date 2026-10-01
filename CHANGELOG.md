@@ -2,6 +2,14 @@
 
 All notable changes to traust-engine are documented here.
 
+## [0.18.1]
+
+## Changes
+
+- traust-contracts v0.46.0 (OWASP risk ratings in the storage `threat` table)
+  and traust-ledger 0.8.4. Ingesting a rated threat model now fills the
+  threat `severity`, score, level and basis columns. Nothing else changes.
+
 ## [0.18.0]
 
 ## Changes
