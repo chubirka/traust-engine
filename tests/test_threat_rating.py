@@ -153,6 +153,17 @@ class TestLint(unittest.TestCase):
             errors, _ = lint_markdown(render.render_threat_model(doc))
             self.assertEqual(errors, [], errors)
 
+    def test_rated_model_with_update_history_lints_clean(self):
+        doc = document(rated_threat(), LEGACY_THREAT)
+        doc["update_history"] = [
+            {"date": "2026-10-01", "changes": "rated T1 with OWASP", "reason": "migration"}
+        ]
+        markdown = render.render_threat_model(doc)
+        provenance = markdown[markdown.index("## 7. Provenance") : markdown.index("## 11.")]
+        self.assertIn("### Update history", provenance)
+        errors, _ = lint_markdown(markdown)
+        self.assertEqual(errors, [], errors)
+
     def test_severity_that_does_not_follow_from_the_levels_fails(self):
         markdown = render.render_threat_model(document(rated_threat()))
         bad = markdown.replace(

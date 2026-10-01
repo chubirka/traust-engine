@@ -8,7 +8,11 @@ All notable changes to traust-engine are documented here.
 
 - traust-contracts v0.46.0 (OWASP risk ratings in the storage `threat` table)
   and traust-ledger 0.8.4. Ingesting a rated threat model now fills the
-  threat `severity`, score, level and basis columns. Nothing else changes.
+  threat `severity`, score, level and basis columns.
+- **Fix:** `render` writes a threat model's update history inside section 7.
+  It was written at the end of the document, which only fell inside section 7
+  while nothing came after it. On a rated model it landed in section 11, and
+  lint rejected it.
 
 ## [0.18.0]
 
