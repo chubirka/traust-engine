@@ -164,6 +164,29 @@ class TestLint(unittest.TestCase):
         errors, _ = lint_markdown(markdown)
         self.assertEqual(errors, [], errors)
 
+    def test_optional_asset_columns_and_scenario_prose_survive(self):
+        doc = document(rated_threat())
+        doc["assets"] = [
+            {
+                "asset": "tokens",
+                "description": "API tokens",
+                "sensitivity": "high",
+                "regulatory_scope": "GDPR",
+                "example_records": "bearer tokens",
+            }
+        ]
+        doc["attack_scenarios"] = [
+            {"id": "T1", "threat": "Token theft", "steps": ["An attacker reads the log."]}
+        ]
+        markdown = render.render_threat_model(doc)
+        self.assertIn(
+            "| asset | description | sensitivity | regulatory_scope | example_records |", markdown
+        )
+        self.assertIn("| tokens | API tokens | high | GDPR | bearer tokens |", markdown)
+        self.assertIn("### T1 — Token theft\n\nAn attacker reads the log.\n", markdown)
+        errors, _ = lint_markdown(markdown)
+        self.assertEqual(errors, [], errors)
+
     def test_severity_that_does_not_follow_from_the_levels_fails(self):
         markdown = render.render_threat_model(document(rated_threat()))
         bad = markdown.replace(

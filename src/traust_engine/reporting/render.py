@@ -558,7 +558,16 @@ def render_threat_model(document: dict) -> str:
     lines += ["## 1. System context", "", context, ""]
 
     lines += ["## 2. Assets", ""]
-    lines += _tm_table(("asset", "description", "sensitivity"), document.get("assets") or [])
+    assets = document.get("assets") or []
+    # regulatory_scope and example_records are optional columns (schema.md
+    # section 2); written when any asset carries them, never dropped.
+    asset_columns = (
+        "asset",
+        "description",
+        "sensitivity",
+        *(c for c in ("regulatory_scope", "example_records") if any(a.get(c) for a in assets)),
+    )
+    lines += _tm_table(asset_columns, assets)
     lines += [""]
 
     lines += ["## 3. Entry points & trust boundaries", ""]
@@ -619,8 +628,10 @@ def render_threat_model(document: dict) -> str:
             if scenario.get("threat"):
                 heading += f" — {scenario['threat']}"
             lines += [heading, ""]
-            lines += [f"- {step}" for step in scenario.get("steps") or []]
-            lines += [""]
+            # schema.md section 9: a scenario is prose -- 3-5 sentences telling
+            # the attack as it unfolds -- so each step is a paragraph.
+            for step in scenario.get("steps") or []:
+                lines += [step, ""]
 
     boundaries = document.get("tenant_boundaries") or []
     if boundaries:

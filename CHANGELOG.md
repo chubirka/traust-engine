@@ -10,6 +10,10 @@ All notable changes to traust-engine are documented here.
   It was written at the end of the document, which only fell inside section 7
   while nothing came after it. On an OWASP-rated model it landed in section 11,
   and lint rejected it.
+- **Fix:** `render` writes an asset's optional `regulatory_scope` and
+  `example_records` columns when any asset carries them; they were dropped.
+- **Fix:** attack-scenario steps render as prose paragraphs, as `schema.md`
+  section 9 specifies, instead of bullets.
 
 ## [0.18.1]
 
