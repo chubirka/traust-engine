@@ -593,6 +593,16 @@ def render_threat_model(document: dict) -> str:
             lines.append(f"- {field}: unset")
     lines += [""]
 
+    # The update history belongs to section 7 (schema.md; the linter reads it
+    # from there). It was emitted at the end of the document, which only
+    # landed in section 7 while nothing followed it -- a rated model's
+    # section 11 now does.
+    history = document.get("update_history") or []
+    if history:
+        lines += ["### Update history", ""]
+        lines += _tm_table(("date", "changes", "reason"), history)
+        lines += [""]
+
     # Sections 8-10 are OPTIONAL. Present-but-empty is an error to the
     # linter, absent is not -- so a model with nothing to say omits them.
     mitigations = document.get("mitigations") or []
@@ -650,11 +660,5 @@ def render_threat_model(document: dict) -> str:
                 tuple(threat_rating.FACTOR_COLUMNS), threat_rating.factor_rows(rating)
             )
             lines += [""]
-
-    history = document.get("update_history") or []
-    if history:
-        lines += ["### Update history", ""]
-        lines += _tm_table(("date", "changes", "reason"), history)
-        lines += [""]
 
     return "\n".join(lines).rstrip() + "\n"

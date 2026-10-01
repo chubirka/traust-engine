@@ -2,6 +2,15 @@
 
 All notable changes to traust-engine are documented here.
 
+## [0.18.2]
+
+## Changes
+
+- **Fix:** `render` writes a threat model's update history inside section 7.
+  It was written at the end of the document, which only fell inside section 7
+  while nothing came after it. On an OWASP-rated model it landed in section 11,
+  and lint rejected it.
+
 ## [0.18.1]
 
 ## Changes
