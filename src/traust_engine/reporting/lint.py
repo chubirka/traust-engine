@@ -23,6 +23,8 @@ in the summary; they never fail the run, matching validate_report.py --strict.
 import re
 from pathlib import Path
 
+from traust_engine.reporting import threat_rating
+
 REQUIRED_SECTIONS = [
     "1. System context",
     "2. Assets",
@@ -32,7 +34,12 @@ REQUIRED_SECTIONS = [
     "6. Open questions",
     "7. Provenance",
 ]
-OPTIONAL_SECTIONS = ["8. Recommended mitigations", "9. Attack scenarios", "10. Tenant boundaries"]
+OPTIONAL_SECTIONS = [
+    "8. Recommended mitigations",
+    "9. Attack scenarios",
+    "10. Tenant boundaries",
+    "11. Risk ratings",
+]
 
 ACTOR_ENUM = {
     "remote_unauth",
@@ -78,7 +85,32 @@ ATTACK_REFS_SINCE = (0, 82, 0)
 # tagging which dimension a threat stresses. Multi-tenant services only;
 # never required — 10- and 11-column tables stay valid.
 THREATS_COLUMNS_ISOLATION = [*THREATS_COLUMNS_ATTACK, "isolation_dimensions"]
-THREATS_COLUMN_VARIANTS = (THREATS_COLUMNS, THREATS_COLUMNS_ATTACK, THREATS_COLUMNS_ISOLATION)
+# OWASP Risk Rating Methodology variant: `severity | likelihood | impact`
+# replace the legacy `impact | likelihood` pair (cell forms and the rating
+# arithmetic: reporting/threat_rating.py). Always carries attack_refs, since
+# only new emissions are rated; isolation_dimensions stays optional.
+THREATS_COLUMNS_OWASP = [
+    "id",
+    "threat",
+    "actor",
+    "surface",
+    "asset",
+    "severity",
+    "likelihood",
+    "impact",
+    "status",
+    "controls",
+    "evidence",
+    "attack_refs",
+]
+THREATS_COLUMNS_OWASP_ISOLATION = [*THREATS_COLUMNS_OWASP, "isolation_dimensions"]
+THREATS_COLUMN_VARIANTS = (
+    THREATS_COLUMNS,
+    THREATS_COLUMNS_ATTACK,
+    THREATS_COLUMNS_ISOLATION,
+    THREATS_COLUMNS_OWASP,
+    THREATS_COLUMNS_OWASP_ISOLATION,
+)
 
 # Section 10 "Tenant boundaries" (optional; multi-tenant services only).
 # Vocabulary is shared with the isolation-review skill: interface kind,
@@ -295,6 +327,7 @@ def lint_file(path, strict=False):
 
     # -- Section 4: Threats -----------------------------------------------
     threat_ids, surface_cells, threat_rows = [], [], []
+    rated_rows = {}  # id -> section 4 row, OWASP variant only
     threat_cols_seen = None
     b = body("4. Threats")
     if b is not None:
@@ -305,7 +338,9 @@ def lint_file(path, strict=False):
             errors.append(
                 f"section 4 columns must be {THREATS_COLUMNS} "
                 f"(optionally + ['attack_refs'], optionally then "
-                f"+ ['isolation_dimensions']), got {cols}"
+                f"+ ['isolation_dimensions']), or the OWASP-rated "
+                f"{THREATS_COLUMNS_OWASP} (optionally + "
+                f"['isolation_dimensions']), got {cols}"
             )
         else:
             threat_cols = threat_cols_seen = cols
@@ -328,11 +363,20 @@ def lint_file(path, strict=False):
                 for a in re.split(r",\s*", row["actor"]):
                     if a not in ACTOR_ENUM:
                         errors.append(f"section 4 {tid}: actor '{a}' not in {sorted(ACTOR_ENUM)}")
-                for field, enum in (
-                    ("impact", IMPACT_ENUM),
-                    ("likelihood", LIKELIHOOD_ENUM),
-                    ("status", STATUS_ENUM),
-                ):
+                if "severity" in row:
+                    for msg in threat_rating.cell_problems(
+                        row["severity"], row["likelihood"], row["impact"]
+                    ):
+                        errors.append(f"section 4 {tid}: {msg}")
+                    rated_rows[tid] = row
+                    rating_enums = (("status", STATUS_ENUM),)
+                else:
+                    rating_enums = (
+                        ("impact", IMPACT_ENUM),
+                        ("likelihood", LIKELIHOOD_ENUM),
+                        ("status", STATUS_ENUM),
+                    )
+                for field, enum in rating_enums:
                     if row[field] not in enum:
                         errors.append(
                             f"section 4 {tid}: {field} '{row[field]}' not in {sorted(enum)}"
@@ -374,13 +418,23 @@ def lint_file(path, strict=False):
                                 f"'{d}' not in {ISOLATION_DIMENSIONS}"
                             )
             # sort order (warning: legacy models predate strict ordering)
-            keys = [
-                (IMPACT_ORDER.index(r["impact"]), LIKELIHOOD_ORDER.index(r["likelihood"]))
-                for r in threat_rows
-                if r["impact"] in IMPACT_ENUM and r["likelihood"] in LIKELIHOOD_ENUM
-            ]
-            if keys != sorted(keys):
-                warnings.append("section 4 rows are not sorted by (impact desc, likelihood desc)")
+            if "severity" in threat_cols:
+                keys = [threat_rating.order_key(threat_rating.parse_row(r)) for r in threat_rows]
+                if keys != sorted(keys):
+                    warnings.append(
+                        "section 4 rows are not sorted by (severity desc, impact score "
+                        "desc, likelihood score desc), unrated rows after rated ones"
+                    )
+            else:
+                keys = [
+                    (IMPACT_ORDER.index(r["impact"]), LIKELIHOOD_ORDER.index(r["likelihood"]))
+                    for r in threat_rows
+                    if r["impact"] in IMPACT_ENUM and r["likelihood"] in LIKELIHOOD_ENUM
+                ]
+                if keys != sorted(keys):
+                    warnings.append(
+                        "section 4 rows are not sorted by (impact desc, likelihood desc)"
+                    )
 
     # -- Section 5: Deprioritized ------------------------------------------
     depri_text = ""
@@ -548,7 +602,101 @@ def lint_file(path, strict=False):
                         f"<service-slug>/ path"
                     )
 
+    # -- Section 11: Risk ratings (required when section 4 is OWASP-rated) -----
+    b = body("11. Risk ratings")
+    rated = {
+        tid: row for tid, row in rated_rows.items() if row["severity"] != threat_rating.UNRATED
+    }
+    if b is None:
+        if rated:
+            errors.append(
+                f"section 11 (Risk ratings) is missing; it must list the factor "
+                f"scores for rated threats {sorted(rated)}"
+            )
+    else:
+        errors += _lint_risk_ratings(b, rated, threat_ids)
+
     return errors, warnings
+
+
+def _rating_subsections(body_lines):
+    """Split section 11 into (threat id, heading line, body lines)."""
+    out, current = [], None
+    for line in body_lines:
+        if line.startswith("### "):
+            m = threat_rating.RATING_HEADING.match(line)
+            current = (m.group(1) if m else None, line.strip(), [])
+            out.append(current)
+        elif current is not None:
+            current[2].append(line)
+    return out
+
+
+def _lint_risk_ratings(body_lines, rated, threat_ids):
+    """Section 11: every rated threat has a factor table that reproduces the
+    severity, levels and scores its section 4 row states."""
+    errors = []
+    seen = []
+    for tid, heading, sub in _rating_subsections(body_lines):
+        if tid is None:
+            errors.append(f"section 11 heading '{heading}' must start '### T<n>'")
+            continue
+        where = f"section 11 {tid}"
+        if tid in seen:
+            errors.append(f"{where}: duplicate subsection")
+            continue
+        seen.append(tid)
+        if tid not in threat_ids:
+            errors.append(f"{where}: references unknown threat id")
+            continue
+        if tid not in rated:
+            errors.append(f"{where}: section 4 does not rate this threat")
+            continue
+        cols, rows = parse_table(sub)
+        if cols != threat_rating.FACTOR_COLUMNS:
+            errors.append(f"{where}: columns must be {threat_rating.FACTOR_COLUMNS}, got {cols}")
+            continue
+        scores = {}
+        for r in rows:
+            if len(r) != len(cols):
+                errors.append(f"{where}: row has {len(r)} cells, expected {len(cols)}: {r[:1]}")
+                continue
+            name, value = r[0], r[1]
+            if name not in threat_rating.ALL_FACTORS:
+                errors.append(f"{where}: unknown factor '{name}'")
+            elif name in scores:
+                errors.append(f"{where}: factor '{name}' listed twice")
+            elif not re.fullmatch(r"\d", value):
+                errors.append(f"{where}: factor '{name}' score '{value}' must be 0-9")
+            else:
+                scores[name] = int(value)
+        stated = threat_rating.parse_row(rated[tid])
+        if stated["severity_source"] != "owasp":
+            continue  # the section 4 cell errors already say why
+        rating, problems = threat_rating.rating_from_factors(scores, stated["impact_basis"])
+        errors += [f"{where}: {p}" for p in problems]
+        if rating is None:
+            continue
+        computed = threat_rating.parse_row(
+            {
+                "severity": rating["severity"],
+                "likelihood": threat_rating.likelihood_cell(rating),
+                "impact": threat_rating.impact_cell(rating),
+            }
+        )
+        for key in ("severity", "likelihood", "impact", "likelihood_score", "impact_score"):
+            if computed[key] != stated[key]:
+                errors.append(
+                    f"{where}: factors give {key} {computed[key]!r}, section 4 says {stated[key]!r}"
+                )
+        heading_severity = heading.split("—")[-1].strip() if "—" in heading else None
+        if heading_severity and heading_severity != rating["severity"]:
+            errors.append(
+                f"{where}: heading says '{heading_severity}', factors give '{rating['severity']}'"
+            )
+    for tid in sorted(set(rated) - set(seen)):
+        errors.append(f"section 11 has no factor table for rated threat {tid}")
+    return errors
 
 
 def collect(paths):

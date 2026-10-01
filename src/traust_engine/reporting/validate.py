@@ -1618,6 +1618,17 @@ def strict_checks(report: dict, result: ValidationResult):
             )
 
 
+def cross_validate_threat_model(report: dict, result: ValidationResult) -> None:
+    """Each OWASP risk_rating's derived values must follow from its factors."""
+    from traust_contracts.v1 import risk_rating
+
+    for i, threat in enumerate(report.get("threats") or []):
+        rating = threat.get("risk_rating")
+        if rating:
+            for problem in risk_rating.problems(rating):
+                result.error(f"threats[{i}] ({threat.get('id', '?')}) risk_rating: {problem}")
+
+
 def validate_report(
     file_path: str,
     schema: dict,
@@ -1676,8 +1687,10 @@ def validate_report(
             # the Markdown is rendered from it. The code-audit cross-checks
             # (severity_criteria, findings_summary) describe a finding
             # report and do not fit a threat model at all; the schema's
-            # enums and required fields ARE the contract here.
-            pass
+            # enums and required fields ARE the contract here, plus the one
+            # thing a schema cannot say: an OWASP rating's scores, levels
+            # and severity must follow from its factors.
+            cross_validate_threat_model(report, result)
         else:
             cross_validate(report, result)
 
