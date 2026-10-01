@@ -14,6 +14,8 @@ All notable changes to traust-engine are documented here.
   `example_records` columns when any asset carries them; they were dropped.
 - **Fix:** attack-scenario steps render as prose paragraphs, as `schema.md`
   section 9 specifies, instead of bullets.
+- traust-contracts 0.47.0 (every threat-model section defined) and
+  traust-ledger 0.8.5.
 
 ## [0.18.1]
 

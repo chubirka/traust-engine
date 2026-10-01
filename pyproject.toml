@@ -9,8 +9,8 @@ license = "Apache-2.0"
 description = "Processing core for the AI security harness: scanners, data management, analysis, format handlers"
 requires-python = ">=3.11"
 dependencies = [
-    "traust-contracts>=0.46.0",
-    "traust-ledger>=0.8.4",
+    "traust-contracts>=0.47.0",
+    "traust-ledger>=0.8.5",
     "jsonschema>=4.0",
     "referencing",
     "pyyaml",
@@ -37,8 +37,8 @@ gcs = ["fsspec>=2024.2", "gcsfs>=2024.2"]
 dev = ["fsspec>=2024.2", "pytest>=9.1.1", "ruff>=0.6", "vulture>=2.16"]
 
 [tool.uv.sources]
-traust-contracts = { git = "https://github.com/traust-security/traust-contracts.git", tag = "v0.46.0" }
-traust-ledger = { git = "https://github.com/traust-security/traust-ledger.git", rev = "b556358ee29167a5f06e40114898c08172b02c63" }
+traust-contracts = { git = "https://github.com/traust-security/traust-contracts.git", rev = "c1c22165f30287c3b83e56a1830d275a1a14bc41" }
+traust-ledger = { git = "https://github.com/traust-security/traust-ledger.git", rev = "bb566af52597befcdc1ce496f7ca4694279a6d27" }
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/traust_engine"]
